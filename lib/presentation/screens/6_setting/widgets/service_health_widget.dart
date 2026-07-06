@@ -3,6 +3,7 @@ import 'package:nusantara_gps/core/service/service_health_store.dart';
 import 'package:nusantara_gps/core/app/app_color_theme.dart';
 import 'package:nusantara_gps/core/app/app_text_theme.dart';
 import 'package:nusantara_gps/core/service/alert_polling_service.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 class ServiceHealthWidget extends StatefulWidget {
   const ServiceHealthWidget({super.key});
@@ -23,16 +24,25 @@ class _ServiceHealthWidgetState extends State<ServiceHealthWidget> {
 
   Future<void> _onRefreshTap() async {
     if (_loading) return;
-  setState(() => _loading = true);
+    setState(() => _loading = true);
 
-  // Jika service mati, restart dulu sebelum refresh
-  final snap = await ServiceHealthStore.instance.getSnapshot();
+    final snap = await ServiceHealthStore.instance.getSnapshot();
     if (snap != null && !snap.isHealthy) {
       try {
-        await AlertPollingService.instance.stopService();
-        await Future.delayed(const Duration(seconds: 2));
-        await AlertPollingService.instance.initAndStart();
-        await Future.delayed(const Duration(seconds: 3));
+        // Cek dulu apakah service benar-benar tidak jalan
+        final service = FlutterBackgroundService();
+        final isRunning = await service.isRunning();
+
+        if (isRunning) {
+          // Service masih jalan tapi health store bilang mati
+          // → tidak perlu restart, cukup tunggu polling berikutnya
+        } else {
+          // Benar-benar mati → restart
+          await AlertPollingService.instance.stopService();
+          await Future.delayed(const Duration(seconds: 1));
+          await AlertPollingService.instance.initAndStart();
+          await Future.delayed(const Duration(seconds: 4));
+        }
       } catch (_) {}
     }
 

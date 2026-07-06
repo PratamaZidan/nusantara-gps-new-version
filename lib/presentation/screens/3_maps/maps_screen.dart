@@ -63,6 +63,22 @@ class MapsScreen extends StatelessWidget {
             ),
           const SizedBox(height: 16),
 
+          Consumer<MapsViewModel>(
+            builder: (context, vm, _) => FloatingActionButton(
+              heroTag: "toggle_geofence",
+              backgroundColor: vm.showGeofenceOverlay
+                  ? AppColorTheme.primary
+                  : Colors.white,
+              foregroundColor: vm.showGeofenceOverlay
+                  ? Colors.white
+                  : AppColorTheme.primary,
+              onPressed: () => vm.toggleGeofenceOverlay(),
+              tooltip: vm.showGeofenceOverlay ? 'Sembunyikan Geofence' : 'Tampilkan Geofence',
+              child: const Icon(Icons.pentagon_outlined),
+            ),
+          ),
+          const SizedBox(height: 16),
+
           FloatingActionButton(
             heroTag: "current_location",
             backgroundColor: AppColorTheme.primary,
@@ -74,6 +90,7 @@ class MapsScreen extends StatelessWidget {
             child: const Icon(Icons.my_location_rounded),
           ),
           const SizedBox(height: 16),
+
           FloatingActionButton(
             heroTag: "list_device",
             backgroundColor: AppColorTheme.primary,
@@ -84,6 +101,7 @@ class MapsScreen extends StatelessWidget {
             child: const Icon(Icons.directions_car_rounded),
           ),
           const SizedBox(height: 16),
+          
           FloatingActionButton(
             heroTag: "map_source",
             backgroundColor: AppColorTheme.primary,

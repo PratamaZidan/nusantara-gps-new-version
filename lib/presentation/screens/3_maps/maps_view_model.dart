@@ -115,7 +115,7 @@ class MapsViewModel extends ChangeNotifier {
   // Geofence Overlay
   List<GeofenceModel> _geofenceList = [];
 
-  bool _showGeofenceOverlay = true;
+  bool _showGeofenceOverlay = false;
   bool get showGeofenceOverlay => _showGeofenceOverlay;
 
   ResultState _geofenceOverlayState = ResultState.initial;
@@ -123,6 +123,20 @@ class MapsViewModel extends ChangeNotifier {
 
   void toggleGeofenceOverlay() {
     _showGeofenceOverlay = !_showGeofenceOverlay;
+    notifyListeners();
+  }
+
+  Future<void> loadGeofenceOverlay() async {
+    if (_geofenceOverlayState == ResultState.loading) return;
+    _geofenceOverlayState = ResultState.loading;
+
+    try {
+      final list = await _vehicleRepo.getGeofenceArea();
+      _geofenceList = list;
+      _geofenceOverlayState = ResultState.success;
+    } catch (_) {
+      _geofenceOverlayState = ResultState.error;
+    }
     notifyListeners();
   }
 
@@ -175,6 +189,8 @@ class MapsViewModel extends ChangeNotifier {
       notifyListeners();
 
       _startPolling();
+      loadGeofenceOverlay();
+      init();
     } on DioException catch (e) {
       _errorMessage = mapDioErrorToMessage(e);
       _loadTrackingDataState = ResultState.error;
@@ -335,10 +351,14 @@ class MapsViewModel extends ChangeNotifier {
     );
   }
 
-  void recenterSelfLocation() {
-    if (_currentLatLng == null) return;
-    recenterCamera(_currentLatLng!.latitude, _currentLatLng!.longitude);
+  void recenterSelfLocation() async {
+  if (_currentLatLng == null) {
+    await init();
+    await Future.delayed(const Duration(seconds: 2));
   }
+  if (_currentLatLng == null) return; // masih null = GPS tidak tersedia
+  recenterCamera(_currentLatLng!.latitude, _currentLatLng!.longitude);
+}
 
   void recenterCamera(double lat, double long) {
     if (mapSource == MapSource.google) {

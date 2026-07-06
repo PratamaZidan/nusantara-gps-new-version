@@ -81,7 +81,7 @@ class ServiceHealthSnapshot {
     if (lastGeofenceCheck == null) return false;
     final last = DateTime.tryParse(lastGeofenceCheck!);
     if (last == null) return false;
-    return DateTime.now().difference(last) < Duration(minutes: 5);
+    return DateTime.now().difference(last) < Duration(minutes: 10);
   }
 
   String get serviceUptime {

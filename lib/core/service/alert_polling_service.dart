@@ -323,7 +323,7 @@ Future<void> _pollGeofenceDetection(
             geofenceId: geofenceId.toString(),
             geofenceName: geofenceName,
             isEntering: event.isEntering,
-            timestamp: DateTime.now().toIso8601String().split('.').first,
+            timestamp: DateTime.now().toIso8601String().split('.').first.replaceAll('T', ' '),
           ));
 
           // System notification
