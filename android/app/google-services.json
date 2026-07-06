@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "350971972256",
+    "project_id": "pratama-zidan",
+    "storage_bucket": "pratama-zidan.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:350971972256:android:547413ad264884606e97c5",
+        "android_client_info": {
+          "package_name": "com.pis.nusantara_gps"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABPylwprGk-4z14_Q-BvWLmH9zUUBs0Vo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

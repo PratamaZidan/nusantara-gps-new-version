@@ -1,0 +1,2314 @@
+
+function hidesidenav(){
+  $('.sidenav').removeClass('show');
+  $('.sidenav-overlay').css("display", "none");
+  $('body').removeClass('sidenav-no-scroll');
+}
+
+function gomenu(select){
+  $('.content-left').removeClass('selected');
+  $('.sidenav-menu li a').removeClass('active');
+  $('.'+select).addClass('selected');
+}
+
+var clearBubles = function() {
+  for(var k=0,len=infoBubles.length; k<len; k++) {
+    infoBubles[k].close();
+    infoBubles[k].onRemove();
+  }
+  infoBubles=new Array();
+}
+
+
+$(document).ready(function(){
+
+  refreshSavedHistory();
+  SavedHistorymob();
+
+  $('#dash-home').click(function(){
+    hidesidenav();
+    gomenu('cl-dashboard');
+    $(this).addClass('active');
+  });
+
+  $('#dash-history').click(function(){
+    hidesidenav();
+    gomenu('cl-history');
+    $(this).addClass('active');
+  });
+
+  $('#dash-geofence').click(function(){
+    hidesidenav();
+    gomenu('cl-pagar');
+    $(this).addClass('active');
+  });
+
+  $('#dash-poi').click(function(){
+    hidesidenav();
+    gomenu('cl-poi');
+    $(this).addClass('active');
+  });
+
+  $(document).on("click", '.displaySavedHistory', function(e) {
+    e.preventDefault();
+    displaySavedHistory($(this).data('index'));
+  });
+
+  $(document).on("click", '.deleteSavedHistory', function(e) {
+    e.preventDefault();
+    deleteSavedHistory($(this).data('index'));
+  });
+
+  var map,
+  geocoder,
+  drawingManager,
+  MARKERS = [],
+  INFOWINDOW = [],
+  LABELS = [],
+  POSITION_CACHE = {},
+  devicerefresh = true,
+  devicelists = [],
+  norefresh = false,
+  autorefresh = true,
+  firstload = true,
+  followme = false,
+  historyMarkers = [],
+  historyLine = [],
+  historyLinePos ,
+  overlayArray = [],
+  LokasiArray = [],
+  alertInterval = null,
+  infoBubles= [],
+  prevpic=false,
+  nextpic=false,
+  isplay = false,
+  toPlay,
+  mapOptions,
+  showstate = 2,
+  cats,
+  justwait = false,
+  infowindowHistory,
+  savedHistoryPage,
+  savedGeoPage,
+  savedGeoArray = [],
+  savedHistoryArray = [];
+  cur_icon_track = '';
+
+
+
+
+  function initialize() {
+    var lvMapTypeIds = [];
+    for(var lvType in google.maps.MapTypeId) {
+      lvMapTypeIds.push(google.maps.MapTypeId[lvType]);
+    }
+
+    lvMapTypeIds.push("Waze");
+    lvMapTypeIds.push("OSM");
+
+    //var center = new google.maps.LatLng(geoip_latitude(), geoip_longitude());
+    var center = new google.maps.LatLng(-7.929690, 112.616582);
+
+    mapOptions = {
+      center: center,
+      zoom: 17,
+      mapTypeId: google.maps.MapTypeId.ROADMAP,
+      mapTypeControlOptions: {
+        mapTypeIds: lvMapTypeIds,
+        style: google.maps.MapTypeControlStyle.DEFAULT
+      }
+    };
+
+    map = new google.maps.Map(document.getElementById("map-canvas"), mapOptions);
+    map.mapTypes.set("Waze", new google.maps.ImageMapType({
+      getTileUrl: function(fpCoord, fpZoom) {
+        return "https://worldtiles4.waze.com/tiles/" + fpZoom + "/" + fpCoord.x + "/" + fpCoord.y + ".png?highres=true";
+      },
+      tileSize: new google.maps.Size(256, 256),
+      name: "Waze",
+      maxZoom: 18
+    }));
+    map.mapTypes.set("OSM", new google.maps.ImageMapType({
+      getTileUrl: function(coord, zoom) {
+        return "http://tile.openstreetmap.org/" + zoom + "/" + coord.x + "/" + coord.y + ".png";
+      },
+      tileSize: new google.maps.Size(256, 256),
+      name: "OSM",
+      maxZoom: 18
+    }));
+
+    geocoder = new google.maps.Geocoder();
+
+    drawingManager = new google.maps.drawing.DrawingManager({
+      drawingControl: false,
+      drawingControlOptions: {
+        position: google.maps.ControlPosition.TOP_CENTER,
+        drawingModes: [
+        google.maps.drawing.OverlayType.RECTANGLE,
+        google.maps.drawing.OverlayType.CIRCLE,
+        google.maps.drawing.OverlayType.POLYGON
+        ]
+      },
+      circleOptions: {
+        fillColor: '#888888',
+        fillOpacity: 0.6,
+        strokeWeight: 1,
+        strokeColor: 'blue',
+        clickable: false,
+        editable: true,
+        zIndex: 1
+      },
+      rectangleOptions: {
+        fillColor: '#8888aa',
+        fillOpacity: 0.6,
+        strokeWeight: 1,
+        strokeColor: 'orange',
+        clickable: false,
+        editable: true,
+        zIndex: 1
+      },
+      polygonOptions: {
+        fillColor: '#8888aa',
+        fillOpacity: 0.6,
+        strokeWeight: 1,
+        strokeColor: 'red',
+        clickable: false,
+        editable: true,
+        zIndex: 1
+      }
+    });
+    drawingManager.setMap(map);
+    google.maps.event.addListener(drawingManager, 'overlaycomplete', function(overlay) {
+      if (window.console) console.log(['overlaycomplete', overlay, overlayArray]);
+      overlayArray.push(overlay.overlay);
+      if (overlayArray.length > 1) {
+        for (var i in overlayArray) {
+          if (overlay.overlay != overlayArray[i]) {
+            if (overlayArray[i].setMap !== undefined) {
+              overlayArray[i].setMap(null);
+            }
+          }
+        }
+      }
+
+      switch(overlay.type) {
+        case "rectangle":
+        google.maps.event.addListener(overlay.overlay, 'bounds_changed', function() {
+          updateOverlay(overlay);
+          if (window.console)
+            console.log( ['bounds_changed', overlay.overlay.getBounds()] );
+        });
+        break;
+        case "circle":
+        google.maps.event.addListener(overlay.overlay, 'radius_changed', function() {
+          updateOverlay(overlay);
+          if (window.console)
+            console.log( ['radius_changed', overlay.overlay.getRadius(),overlay.overlay.getCenter()] );
+        });
+        google.maps.event.addListener(overlay.overlay, 'center_changed', function() {
+          updateOverlay(overlay);
+          if (window.console)
+            console.log( ['center_changed', overlay.overlay.getRadius(),overlay.overlay.getCenter()] );
+        });
+        break;
+        case "polygon":
+        google.maps.event.addListener(overlay.overlay, 'mouseup', function() {
+          me.updateOverlay(overlay);
+          if (window.console)
+            console.log( ['mouseup', overlay.overlay.getPaths()] );
+        });
+        break;
+      }
+      updateOverlay(overlay);
+    });
+
+    // custom control for auto refersh
+    var customControlDiv = document.createElement('div');
+    customControlDiv.setAttribute('id','custom-control');
+    customControlDiv.setAttribute('class','custom-control');
+    customControlDiv.addEventListener("click", autoRefreshClick, false);
+    customControlDiv.index = 1;
+
+    var autoRefreshDiv = document.createElement('div');
+    autoRefreshDiv.setAttribute('id','auto-refresh');
+    autoRefreshDiv.setAttribute('class','auto-refresh');
+    //autoRefreshDiv.style.padding = '5px';
+    autoRefreshDiv.innerHTML = 'Auto Refresh <i class="fa fa-check-square-o" aria-hidden="true"></i>';
+    customControlDiv.appendChild( autoRefreshDiv );
+
+    map.controls[google.maps.ControlPosition.BOTTOM_LEFT].push( customControlDiv );
+
+    // Control onoff for device
+    var onoffControlDiv = document.createElement('div');
+    onoffControlDiv.style.padding = '5px';
+    onoffControlDiv.index = 1;
+
+    var controlAll = document.createElement('div');
+    controlAll.setAttribute("id", "alldevs");
+    controlAll.innerHTML = '0 All';
+    controlAll.addEventListener("click",function(){showstate = 2; firstload=true; updateMarkers();},false);
+    onoffControlDiv.appendChild(controlAll);
+
+    var controlOff = document.createElement('div');
+    controlOff.setAttribute("id", "offdevs");
+    controlOff.innerHTML = '0 Off';
+    controlOff.addEventListener("click",function(){showstate = 0; firstload=true; updateMarkers();},false);
+    onoffControlDiv.appendChild(controlOff);
+
+    var controlOn = document.createElement('div');
+    controlOn.setAttribute("id", "ondevs");
+    controlOn.innerHTML = '0 On';
+    controlOn.addEventListener("click",function(){showstate = 1; firstload=true; updateMarkers();},false);
+    onoffControlDiv.appendChild(controlOn);
+
+
+    //onoffControlDiv.style.width = '100px';
+    map.controls[google.maps.ControlPosition.TOP_RIGHT].push(onoffControlDiv);
+  }
+
+  function autoRefreshClick() {
+    if ( autorefresh ) {
+        $('#auto-refresh i').removeClass('fa-check-square-o');
+        $('#auto-refresh i').addClass('fa-square-o');
+    }
+    else {
+        $('#auto-refresh i').addClass('fa-check-square-o');
+        $('#auto-refresh i').removeClass('fa-square-o');
+    }
+
+    autorefresh = !autorefresh;
+
+    console.log('autorefresh', autorefresh );
+    updateMarkers();
+ }
+
+  //function clearMarkers() {
+    window.clearMarkers = function() {
+        window.clearTimeout(window.timer);
+        
+    for (var i in MARKERS ) {
+      google.maps.event.addListener(MARKERS[i], 'click', function(){});
+      google.maps.event.addListener(INFOWINDOW[i], 'domready', function(){});
+      google.maps.event.addListener(INFOWINDOW[i], 'closeclick', function(){});
+      MARKERS[i].setMap(null);
+    }
+
+    for( var i in historyMarkers ) {
+      historyMarkers[i].setMap(null);
+    }
+
+    for(var i in infoBubles) {
+      infoBubles[i].close();
+      infoBubles[i].onRemove();
+    }
+    
+        for ( var i in LABELS ) {
+            var label = LABELS[i];
+            label.setMap( null );
+        }
+  
+      infoBubles  = new Array();
+      historyMarkers = new Array();
+      MARKERS = new Array();
+      INFOWINDOW = new Array();
+      LABELS = new Array();
+  }
+  
+  function clearMarks() {
+        // console.log('MARKERS', MARKERS );
+
+        for ( var i in MARKERS ) {
+            var mark = MARKERS[i];
+            // console.log('mark', mark );
+            mark.setMap( null );
+        }
+
+        for( var i in historyMarkers ) {
+            historyMarkers[i].setMap(null);
+        }
+
+        for ( var i in LABELS ) {
+            var label = LABELS[i];
+            // console.log('mark', label );
+            label.setMap( null );
+        }
+
+        MARKERS = [];
+        LABELS = [];
+        INFOWINDOW = [];
+  }
+
+  function clearOverlay() {
+    if ( overlayArray ) {
+      for ( i in overlayArray ) {
+        if (overlayArray[i].setMap !== undefined) {
+          overlayArray[i].setMap(null);
+        }
+      }
+      overlayArray.length = 0;
+    }
+  }
+
+  //function updateMarkers() {
+    window.timer = null;
+    
+    window.updateMarkers = function() {
+        window.clearTimeout(window.timer);
+        
+        $.ajax({
+            type: 'GET',
+            dataType: 'json',
+            data: {act: "listkejadian", ids:'', kode:'', catid: window.kategori_select},
+            url: document.location.origin + "/assets/API/hrpc.php",
+            success: function(data) {
+                // map = new google.maps.Map(document.getElementById("map-canvas"), mapOptions);
+                var number_active = number_inactive = 0;
+                var idx = 0;
+
+                if (window.console) console.log(['listkejadian', autorefresh, data]);
+                
+                var NewMarker = NewMarkerClass();   
+
+                for(var i=0,len=data.root.length; i<len; i++) {
+                    var d = data.root[i];
+
+                  if ( d.engine == '1' ) {
+                        number_active++;
+                    }
+                    else {
+                        number_inactive++;
+                    }
+
+                    if (showstate==1)
+                    {
+                        if (d.engine == '0') {
+                            data.root[i] = undefined;
+                        }
+
+                    }
+                    else
+                    if (showstate==0)
+                    {
+                        if (d.engine == '1') {
+                            data.root[i] = undefined;
+                        }
+                    }
+                };
+              /*
+              var on = document.getElementById('ondevs');
+              if (on) on.innerHTML = ond + ' On';
+              var off = document.getElementById('offdevs');
+              if (off) off.innerHTML = offd + ' Off';
+              var all = document.getElementById('alldevs');
+              if (all) all.innerHTML = alld + ' All';
+               */
+
+                if ( firstload ) {
+                    clearMarks();
+                    clearOverlay();
+                    //map.hideLines();
+                }
+
+                var bounds = new google.maps.LatLngBounds();
+
+                for(var i=0,len=data.root.length; i<len; i++) {
+                    var d = data.root[i];
+
+                    if (! d ) continue;
+
+                    var position = new google.maps.LatLng(d.lat, d.lng);
+                    var mark,label,infowindow,isnew=false;
+                    var icon = d.marker.icon.replace('ics/','');
+
+                    //if (window.console) console.log([ 'loop d', d.deviceid, d.marker.icon ]);
+
+                    if ( typeof MARKERS[d.deviceid] != 'undefined') {
+                        mark = MARKERS[d.deviceid];
+                        mark.setPosition(position);
+                        mark.setIcon(document.location.origin+"/assets/icon/"+icon);
+                        mark.setTitle(d.title);
+                        //mark.setEngine(d.engine);
+                    //console.log('sini oy  '+ document.location.origin+"/assets/icon/"+icon)
+                    } else {
+                        if (icon.search('#frame') > -1 ) {
+                            mark = new NewMarker(position, document.location.origin+"/assets/icon/"+icon, d.engine );
+                        }
+                        else {
+                            mark = new google.maps.Marker({position: position, map:map, icon:document.location.origin+"/assets/icon/"+icon, title:d.title, deviceid:d.deviceid, id:d.id});
+                        }
+                        isnew = true;
+                        mark.id = d.id;
+                        mark.deviceid = d.deviceid; 
+                        mark.title = d.title;
+                        mark.device = d.device;
+                        mark.timestamp = d.timestamp;
+                        mark.devicetype = d.devicetype;
+                        mark.angle = d.angle;
+                        mark.speed = d.speed;
+                        mark.voltage = d.voltage;
+                        mark.engine = d.engine;
+                        mark.signal = d.signal;
+                        mark.status = d.status;
+                        mark.charge = d.charge;
+                        mark.lat = d.lat;
+                        mark.lng = d.lng;
+                        mark.setMap(map);
+                        console.log(['mark', mark]);
+                    }
+
+                    if ( typeof LABELS[d.deviceid] != 'undefined') {
+                        label = LABELS[d.deviceid];
+                        label.set('position', position );
+                        label.set('text', d.device );
+                    }
+                    else {
+                        label = new MapLabel({
+                            map         : map,
+                            position    : position,
+                            text        : d.device,
+                            fontSize    : 14,
+                            strokeWeight: 8,
+                            zIndex      : 100,
+                    //zIndexOri   : zindex
+                    });
+                    }
+
+                    LABELS[ d.deviceid ] = label;
+
+
+                    bounds.extend(mark.position);
+                     var wnd = $(window);
+
+
+
+                    if ( typeof INFOWINDOW[d.deviceid] != 'undefined') {
+                        infowindow = INFOWINDOW[d.deviceid];
+                        infowindow.set('posid', d.marker.infoWindow.posid);
+
+                        if (wnd.width() < 767) {
+                          
+                            infowindow.setContent('<div class="iw">'+d.marker.infoWindow.content+'</div>');
+                            
+                        } else if (wnd.width() < 991) {
+                           
+                            infowindow.setContent('<div class="iw">'+d.marker.infoWindow.content+'</div>');
+                            
+                        }else {
+                           
+                            infowindow.setContent('<div class="iwt">'+d.marker.infoWindow.content+'</div>');
+                        }
+
+                    } else {
+                        infowindow = new google.maps.InfoWindow(d.marker.infoWindow);
+                        google.maps.event.addListener(infowindow, 'domready', markerDomReady);
+                        google.maps.event.addListener(infowindow, 'closeclick', infoWindowClose);
+                    }
+
+                    infowindow.setPosition(position);
+
+                    mark.set('infowindow', infowindow);
+                    // console.log("Test", mark);
+
+                    if (isnew) {
+                        google.maps.event.addListener(mark, 'click', markerClicked);
+                    }
+
+                    /*
+                    if ( d.engine == '1' ) {
+                        number_active++;
+                    }
+                    else {
+                        number_inactive++;
+                    }
+                    */
+
+                    MARKERS[d.deviceid] = mark;
+                    INFOWINDOW[d.deviceid] = infowindow;
+                }
+
+                if (firstload) {
+                    map.fitBounds(bounds);
+                    firstload = false;
+                }
+
+                if ( typeof window['followme'] != 'undefined' && window.followme  ) {
+                    var deviceid = window.followme.deviceid;
+                    var marker = typeof MARKERS[deviceid] == 'undefined' ? false : MARKERS[deviceid];
+                    if ( marker ) {
+                        var point = new google.maps.LatLng(marker.position.lat(), marker.position.lng());
+                        map.setCenter(point, map.zoomLevel);
+                    }
+                }
+
+                $('#number-active').html(number_active);
+                $('#number-inactive').html(number_inactive);
+                $('#number-total').html(number_active + number_inactive);
+
+                $('#ondevs').html(number_active + ' On');
+                $('#offdevs').html(number_inactive + ' Off');
+                $('#alldevs').html((number_active + number_inactive ) + ' All');
+
+                if (autorefresh)
+                    window.timer = setTimeout(updateMarkers, 1000*10);
+            },
+            error: function(xhr, textStatus, error) {
+                if (window.console)
+                    console.log(['ajax error', xhr, textStatus, error]);
+                if (autorefresh)
+                    window.timer = setTimeout(updateMarkers, 1000*10);
+            }
+        });
+        
+    }
+
+    //window.updateMarkers = updateMarkers();
+  
+  //function getDevicesMap() {
+    window.getDevicesMap = function() {
+        $.ajax({
+            type: 'GET',
+            dataType: 'json',
+            data: {act: "listdevices", catid: window.kategori_select},
+            url: document.location.origin + "/assets/API/hrpc.php",
+            success: function(data) {
+                if ( data && data.root && typeof data.root == 'object' ) {
+                    $('#deviceselector option').remove();
+                    $('#deviceselector2 option').remove();
+                    $('#deviceselector2mob option').remove();
+                    $('#deviceselector3 option').remove();
+                    
+                    for ( var i in data.root ) {
+                        $('#deviceselector').append(
+                            $('<option></option>')
+                                .val( data.root[i].deviceid )
+                                .html( data.root[i].device )
+                        );
+
+                        $('#deviceselector2').append(
+                            $('<option></option>')
+                                .val( data.root[i].deviceid )
+                                .html( data.root[i].device )
+                        );
+
+                        $('#deviceselector2mob').append(
+                            $('<option></option>')
+                                .val( data.root[i].deviceid )
+                                .html( data.root[i].device )
+                        );
+
+                        $('#deviceselector3').append(
+                            $('<option></option>')
+                                .val( data.root[i].deviceid )
+                                .html( data.root[i].device )
+                        );
+                    }
+
+                    $('#deviceselector').fSelect('reload');
+                    $('#deviceselector2').fSelect('reload');
+
+                    //fungsi ini dipindah ke function js
+                    /*
+                    $('.select-armada').fSelect({
+                        placeholder: 'Pilih armada',
+                        overflowText: '{n} armada dipilih',
+                        searchText: 'Cari armada'
+                    });
+                    */
+                    
+                    $("#deviceselector").on('change', function() {
+                        new google.maps.event.trigger( MARKERS[this.value], 'click' )
+                    });
+
+                    devicerefresh = false;
+                    updateMarkers();
+                }
+            }
+        });
+    }
+
+function getGeofence(){
+  $.ajax({
+    type: 'GET',
+    dataType: 'json',
+    data: {act: "listgeofence"},
+    url: document.location.origin + "/assets/API/hrpc.php",
+    success: function(data) {
+      console.log(data);
+        if ( data && data.root && typeof data.root == 'object' ) {
+
+          $('#geofenceList optgroup').first().nextAll().remove();
+
+          for ( var i in data.root ) {
+            $('#geofenceList').append(
+              $('<option></option>')
+              .val( data.root[i].id )
+              .html( data.root[i].nama )
+              .data( 'values', data.root[i] )
+            );
+          }
+
+          // Select multiple and filtering Lokasi Minat
+          $('#geofenceList').fSelect({
+            placeholder: 'Pilih Pagar Anda',
+            overflowText: '{n} pagar dipilih',
+            searchText: 'Cari pagar '
+          });
+        }
+      }
+  });
+}
+
+function showGeofence( data, isedit ) {
+    var allBound = new google.maps.LatLngBounds();
+
+    switch ( data.geo_type ) {
+        case '1' :
+            var overlayOption = drawingManager.circleOptions;
+            overlayOption.clickable = isedit;
+            overlayOption.editable = isedit;
+            overlayOption.center = new google.maps.LatLng( data.geo_point1, data.geo_point2 );
+            overlayOption.radius = parseInt( data.geo_point3 );
+
+            var overlay = new google.maps.Circle( overlayOption ),
+                o = {type:'circle', overlay: overlay};
+
+            overlay.setMap( map );
+            allBound.extend( overlay.getBounds().getNorthEast() );
+            allBound.extend( overlay.getBounds().getSouthWest() );
+
+            if ( isedit ) {
+                google.maps.event.addListener(overlay, 'radius_changed', function() { updateOverlay( o ); });
+                google.maps.event.addListener(overlay, 'center_changed', function() { updateOverlay( o ); });
+            }
+
+            $('#geo_point_geofence').val( data.geo_point1 +','+ data.geo_point2 +','+ data.geo_point3 );
+
+            break;
+
+        case '2' :
+            var bounds = new google.maps.LatLngBounds();
+
+            bounds.extend(new google.maps.LatLng( data.geo_point1, data.geo_point2 ));
+            bounds.extend(new google.maps.LatLng( data.geo_point3, data.geo_point4 ));
+
+            allBound.extend(new google.maps.LatLng( data.geo_point1, data.geo_point2 ));
+            allBound.extend(new google.maps.LatLng( data.geo_point3, data.geo_point4 ));
+
+            var overlayOption = drawingManager.rectangleOptions;
+            overlayOption.clickable = isedit;
+            overlayOption.editable = isedit;
+            overlayOption.bounds = bounds;
+
+            var overlay = new google.maps.Rectangle( overlayOption ),
+                o = {type:'rectangle', overlay: overlay};
+
+            overlay.setMap( map );
+
+            if ( isedit ) {
+                google.maps.event.addListener(overlay, 'bounds_changed', function() { updateOverlay( o ); });
+            }
+
+            $('#geo_point_geofence').val( data.geo_point1 +','+ data.geo_point2 +','+ data.geo_point3 +','+ data.geo_point4 );
+
+            break;
+
+        default :
+            var points = data.polygon.split('|'), l;
+
+            if ( l = points.length ) {
+                var paths = [];
+                for (var i=0;i<l;i++ ) {
+                    var point = points[i].split(',');
+
+                    if ( point.length != 2 ) continue;
+                    paths.push(new google.maps.LatLng( point[0], point[1] ));
+                    allBound.extend(new google.maps.LatLng( point[0], point[1] ));
+                }
+
+                var overlayOption = drawingManager.polygonOptions;
+                overlayOption.clickable = isedit;
+                overlayOption.editable = isedit;
+                overlayOption.paths = paths;
+
+                var overlay = new google.maps.Polygon( overlayOption ),
+                    o = {type:'polygon', overlay: overlay};
+
+                overlay.setMap( map );
+
+                if ( isedit ) {
+                    google.maps.event.addListener(overlay, 'mouseup', function() { updateOverlay( o ); });
+                }
+            }
+
+            $('#geo_point_geofence').val( data.polygon );
+        }
+
+        overlayArray.push( overlay );
+        map.fitBounds( allBound );
+    }
+
+  function updateOverlay( overlay ) {
+      var geo_type = '',
+      geo_point = '';
+
+      switch (overlay.type) {
+        case "circle":
+        geo_type = '1';
+        geo_point = overlay.overlay.getCenter().lat() + ',' + overlay.overlay.getCenter().lng() + ',' + overlay.overlay.getRadius();
+        break;
+        case "rectangle":
+        geo_type = '2';
+        geo_point = overlay.overlay.getBounds().getSouthWest().lat() + ',' + overlay.overlay.getBounds().getNorthEast().lng() + ',' + overlay.overlay.getBounds().getNorthEast().lat() + ',' + overlay.overlay.getBounds().getSouthWest().lng();
+        break;
+        case "polygon":
+        var i, p, o = overlay.overlay,
+        l = overlay.overlay.getPath().getLength();
+        geo_type = '0';
+        geo_point = []
+        for (i = 0; i < l; i++) {
+          p = o.getPath().getAt(i);
+          geo_point.push(p.toUrlValue(6));
+        }
+        if (geo_point.length) {
+          geo_point = geo_point.join('|');
+        }
+        break;
+      }
+      $('#geo_type_geofence').val( geo_type );
+      $('#geo_point_geofence').val( geo_point );
+    }
+
+  function getLokasi(){
+    $.ajax({
+          type: 'GET',
+          dataType: 'json',
+          data: {act: "listpoi"},
+          url: document.location.origin + "/assets/API/hrpc.php",
+          success: function(data) {
+          console.log("LOKASI",data);
+
+          if ( data && data.root && typeof data.root == 'object' ) {
+
+            $('#locationList optgroup').first().nextAll().remove();
+            
+              for ( var i in data.root ) {
+                  $('#locationList').append(
+                    $('<option></option>')
+                    .val( data.root[i].id )
+                    .html( data.root[i].nama)
+                    .data( 'values', data.root[i])
+                  );
+              }
+
+              $('#locationList').fSelect({
+                    placeholder: 'Pilih Lokasi Anda',
+                    overflowText: '{n} lokasi dipilih',
+                    searchText: 'Cari lokasi minat'
+              });
+
+          // Select multiple and filtering Lokasi Minat
+             
+          }
+        }
+    });
+
+  }
+
+    function showLokasi( data ) {
+        clearLokasi();
+
+        var Lokasint = new google.maps.LatLng(parseFloat( data.lat), parseFloat( data.lng ));
+        console.log("L", Lokasint);
+            data.marker.position = Lokasint;
+
+        var marker = new google.maps.Marker( data.marker ),
+            infowindow = new google.maps.InfoWindow( marker.infoWindow );
+
+        infowindow.setPosition( Lokasint );
+        marker.setMap( map );
+
+        google.maps.event.addListener( marker, 'click', function () {
+            infowindow.open( map, marker );
+        });
+
+        map.setCenter( Lokasint );
+        map.setZoom( 15);
+
+        LokasiArray.push( marker );
+    }
+
+    function clearLokasi() {
+        if ( LokasiArray ) {
+            for ( i in LokasiArray ) {
+                if (LokasiArray[i].setMap !== undefined) {
+                    LokasiArray[i].setMap(null);
+                }
+            }
+            LokasiArray.length = 0;
+        }
+    }
+
+    function placeLokasi( map, Lokasint ) {
+        clearLokasi();
+
+        var marker = new google.maps.Marker({
+          title: 'Lokasi',
+          position: Lokasint,
+          map: map
+        });
+
+        $('#form_Lokasi [name=editLokasiLat]').val( Lokasint.lat() );
+        $('#form_Lokasi [name=editLokasiLong]').val( Lokasint.lng() );
+
+      LokasiArray.push( marker );
+    }
+
+initialize();
+updateMarkers();
+getDevicesMap();
+getGeofence();
+getLokasi();
+
+
+  // $('#deviceselector').trigger("change");
+
+  var wnd = $(window);
+  var jMap = $("#map-canvas");
+
+  wnd.scrollBarWidth = function() {
+    document.body.style.overflow = 'hidden';
+    var width = document.body.clientWidth;
+    document.body.style.overflow = 'scroll';
+    width -= document.body.clientWidth;
+    if(!width) width = document.body.offsetWidth - document.body.clientWidth;
+    document.body.style.overflow = '';
+    return width;
+  };
+
+  // Resize map sesuai screen
+  function resize() {
+    if (wnd.width() < 767) {
+      jMap.width = wnd.width()-30;
+      jMap.height(wnd.height()-($("#top-header").height()+176));
+      console.log("ini mobile");
+    } else if (wnd.width() < 991) {
+      jMap.width = wnd.width()-10;
+      jMap.height(wnd.height()-($("#top-header").height()+54));
+      console.log("ini tablet");
+    }else {
+      jMap.width = (wnd.width()-25)*0.743;
+      jMap.height(wnd.height()-($("#top-header").height()+54));
+      console.log("ini desktop");
+    }
+    google.maps.event.trigger(map, "resize");
+  }
+  wnd.resize();
+  resize();
+
+  wnd.on('resize', function() {
+    resize();
+  });
+
+  // Map Marker - ambil address
+  function markerDomReady() {
+    var obj = this;
+
+    if (window.console)
+      console.log(['domready',obj]);
+
+    if ( obj.get('loading') )
+      return;
+
+    var request = {location:obj.getPosition()};
+    if (window.console)
+      console.log( ['getaddress', request] );
+
+    obj.set('loading', true);
+
+    var cache_key = 'pos' + obj.getPosition().lat() + '-'+ obj.getPosition().lng();
+
+    if (typeof POSITION_CACHE[cache_key] != 'undefined') {
+      document.getElementById(obj.posid).innerHTML = POSITION_CACHE[cache_key];
+      obj.set('loading', false);
+      return;
+    }
+
+    geocoder.geocode(request, function(results, status) {
+      if (window.console)
+        console.log( ['geocode response', results, status] );
+
+      if (status == 'OK') {
+        var address = results[0].formatted_address;
+
+        for ( var i in results[0].address_components ) {
+          if ( results[0].address_components[i].types[0] == 'administrative_area_level_2' ) {
+            address += '<br/>' + results[0].address_components[i].long_name;
+          } else if ( results[0].address_components[i].types[0] == 'administrative_area_level_1' ) {
+            address += ', ' + results[0].address_components[i].long_name;
+          }
+        }
+        document.getElementById(obj.posid).innerHTML = address;
+        $('#device_address').html(address);
+        POSITION_CACHE[cache_key] = address;
+      }
+
+      obj.set('loading', false);
+    });
+  }
+
+  // Info window di close
+  function infoWindowClose() {
+    //stop following
+    followme = false;
+  }
+
+  // Marker di klik
+  function markerClicked() {
+    if (window.console) console.log([ 'markerClicked' ]);
+    var mark = this;
+
+    if (followme ) {
+      // followme.get('infowindow').close();
+    }
+
+    for ( var i in MARKERS ) {
+      MARKERS[i].get('infowindow').close();
+    }
+
+    followme = mark;
+    followme.get('infowindow').open(map,mark);
+    $('#device_id').html(mark.deviceid);
+    $('#device_name').html(mark.device);
+    $('#device_update').html(mark.timestamp);
+    $('#device_type').html(mark.devicetype);
+    $('#device_direction').html(mark.angle + ' derajat');
+    $('#device_speed').html(mark.speed + ' KM/Jam');
+    $('#device_battery').html( Number((mark.voltage/6*100).toFixed(0)) + '%');
+    var engine;
+    if (mark.engine == 0) engine = 'Off';
+    else engine = 'On';
+    $('#device_engine').html(engine);
+    $('#device_signal').html(Number((mark.signal/5*100).toFixed(0)) + '%');
+    $('#device_status').html(mark.status);
+    $('#device_charge').html(mark.charge);
+    $('#device_latitude').html(mark.lat);
+    $('#device_longitude').html(mark.lng);
+
+    if (window.console)
+      console.log(['marker clicked', mark]);
+
+    $('#devicelist li[data-locid="'+ mark.deviceid +'"]').trigger('click');
+
+    map.setCenter(mark.position);
+    if (map.zoom < 15)
+      map.setZoom(15);
+
+      for( var i in historyMarkers ) {
+            historyMarkers[i].setMap(null);
+          }    
+
+  }
+
+  function goPlay() {
+    if (!isplay) return;
+    if (typeof historyLine[historyLinePos] == 'undefined') {
+      playHistory();
+      return;
+    }
+
+    if (historyLinePos > 0) {infowindowHistory.close();}
+    console.log('memainkan');
+    console.log('line pos', historyLine[historyLinePos]);
+    var devid = $("#deviceselector2").val();
+    var marker = MARKERS[devid];
+    historyLinePos++;
+
+    var infowindowContent = historyLine[historyLinePos].title;
+    if (infowindowContent === null) {
+      isplay = false;
+    }
+    infowindowHistory = new google.maps.InfoWindow({
+      content: 'Posisi : ' + infowindowContent
+    }); 
+
+    console.log(['marker:', marker, devid]);
+    console.log(['cur_icon_track:', cur_icon_track]);
+    
+    google.maps.event.clearListeners(marker, 'click');
+
+    var angle = historyLine[historyLinePos].angle;
+    var engine = (typeof historyLine[historyLinePos].tmp2 != "undefined" && historyLine[historyLinePos].tmp2.charAt(2) == '1') || historyLine[historyLinePos].speed > 5 ? 'on' : 'off';
+    var icon = 'mobil#num#_#engine#.png';
+    
+    if ( cur_icon_track.search('motor') >= 0 ) {
+        icon = 'motorsmall#num#_#engine#.png';
+    }
+    else if ( cur_icon_track.search('truk') >= 0 ) {
+        icon = 'truk#num#_#engine#.png';
+    }
+    
+    angle = cur_icon_track.search('mobil') >= 0 ? ( Math.round( angle / 45 ) % 8 + 1 ) : ( Math.round( angle / 15 ) % 24 + 1 );
+    
+    icon = icon.replace('#num#', angle );
+    icon = icon.replace('#engine#', engine );
+    
+    var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/" + icon ); 
+    
+    console.log(['icon', icon]);
+
+    /*
+    if (angle >= 0 && angle <= 14){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil1.png"); 
+
+    }else if(angle >= 15 && angle <= 75 ){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil2.png"); 
+
+    }else if(angle >= 76  &&  angle <= 104){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil3.png"); 
+
+    }else if(angle >= 105 && angle <= 165){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil4.png"); 
+
+    }else if(angle >= 166 && angle <= 194){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil5.png"); 
+
+    }else if(angle >= 195 && angle <= 255){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil6.png");
+
+    }else if(angle >= 256 && angle <= 284){
+
+       var  icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil7.png"); 
+
+    }else if(angle >= 285 && angle <= 345){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil8.png"); 
+    
+    }else if (angle >= 346 && angle <= 360){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil1_off.png"); 
+
+    }  
+    */
+
+    var points = new google.maps.LatLng( historyLine[historyLinePos].lat, historyLine[historyLinePos].lng );
+    
+    infowindowHistory.setPosition( points );
+    marker.setPosition( points );
+    marker.setMap( map );
+    marker.setIcon( icons );
+    map.panTo( new google.maps.LatLng( historyLine[historyLinePos].lat, historyLine[historyLinePos].lng  ) );
+    infowindowHistory.open(map, marker);
+  }
+
+
+  function saveHistory(name){
+    console.log(name);
+    var devid = $("#deviceselector2").val();
+    var tgl1 = $("#startDate").val();
+    var tgl2 = $("#endDate").val();
+
+    var tgltemp = tgl1.split(' ');
+    var yeartemp = tgltemp[0].split('.')
+    tgl1 = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+    tgltemp = tgl2.split(' ');
+    yeartemp = tgltemp[0].split('.')
+    tgl2 = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+    $.ajax({
+      type: 'POST',
+      dataType: 'json',
+      data: {nama: name, deviceid: devid, starttime: tgl1 ,endtime: tgl2 ,distance: 0, duration: 0 },
+      url: document.location.origin + "/assets/API/rpc.php?act=saveroute",
+      success: function(data) {
+        console.log(data);
+      }
+    });
+  }
+
+  function displaySavedHistory(index){
+    historyLinePos = 0;
+    var hist = savedHistoryArray[index];
+    $("#deviceselector2, #deviceselector2mob").val(hist.deviceid);
+    historyLineDisplay(hist.starttime, hist.endtime, hist.deviceid);
+  }
+
+  function deleteSavedHistory(index){
+    console.log(savedHistoryArray[index]);
+    var r = confirm("Apakah yakin akan menghapus '"+savedHistoryArray[index].nama+"'");
+    if (r == true) {
+        $.ajax({
+          type: 'GET',
+          dataType: 'json',
+          data: {act: "delroute", id: savedHistoryArray[index].id},
+          url: document.location.origin + "/assets/API/rpc.php",
+          success: function(data) {
+            refreshSavedHistory(0);
+            location.reload();
+          }
+        });
+    } else {
+        console.log('delete canceled');
+    }
+  }
+
+  function refreshSavedHistory(page = 1){
+    var table = $('#savedHistory tbody');
+    table.find('tr').remove();
+    savedHistoryPage = page;
+    savedHistoryArray = [];
+
+    $.ajax({
+      type: 'GET',
+      dataType: 'json',
+      data: {act: "listroute", start: page * 20 - 19, limit: page * 20, kode: ''},
+      url: document.location.origin + "/assets/API/hrpc.php",
+      success: function(data) {
+        $.each(data['root'], function( index, value ) {
+          var markup = '<tr class="shistory">'+
+          '<td>'+ value.nama +'</td>'+
+          '<td><i class="fa fa-eye marright2"></i> <a href="#" class="displaySavedHistory" data-index="'+index+'">Lihat</a></td>'+
+          '<td><i class="fa fa-trash marright2"></i> <a href="" class="deleteSavedHistory" data-index="'+index+'">Hapus</a></td>'+
+          '</tr>';
+          table.append(markup);
+          savedHistoryArray.push(value);
+        });
+
+
+          pageSize = 3;
+          pagesCount = $('.shistory').length;
+          //pages = pagesCount / 2;
+          var currentPage = 1;
+    
+          /////////// PREPARE NAV ///////////////
+          var nav = '';
+          var totalPages = Math.ceil(pagesCount / pageSize);
+          console.log("tp :", pagesCount);
+          for (var s=0; s<totalPages; s++){
+              nav += '<li class="num"><a href="#">'+(s+1)+'</a></li>';
+          }
+          $(".prev").after(nav);
+          $(".num").first().addClass("active");
+          //////////////////////////////////////
+
+          showPage = function() {
+            $(".shistory").hide().each(function(n) {
+            if (n >= pageSize * (currentPage - 1) && n < pageSize * currentPage)
+                $(this).show();
+            });
+          }
+          showPage();
+
+
+          $(".pagination li.num").click(function() {
+          $(".pagination li").removeClass("active");
+          $(this).addClass("active");
+            currentPage = parseInt($(this).text());
+          showPage();
+          });
+
+          $(".pagination li.prev").click(function() {
+            if($(this).next().is('.active')) return;
+          $('.num.active').removeClass('active').prev().addClass('active');
+              currentPage = currentPage > 1 ? (currentPage-1) : 1;
+          showPage();
+          });
+
+          $(".pagination li.next").click(function() {
+              if($(this).prev().is('.active')) return;
+          $('.num.active').removeClass('active').next().addClass('active');
+              currentPage = currentPage < totalPages ? (currentPage+1) : totalPages;
+          showPage();
+          });
+
+
+      }
+    })
+
+    console.log('refreshing saved history');
+  }
+
+
+  function playHistory() {
+    if (isplay) {
+      $('#historyPlay').html('Mainkan');
+      clearTimeout(toPlay);
+      isplay = false;
+    } else {
+      $('#historyPlay').html('Berhenti');
+      isplay = true;
+        // toPlay = setTimeout(goPlay(), 1000);
+        toPlay = window.setInterval(function(){
+          goPlay();
+        }, 1000);
+      }
+  }
+
+
+    $("#historyCheck").click(function(e) {
+
+      var devid = $("#deviceselector2").val();
+      if (devid == 'Pilih Armada') {
+        alert("Pilih unit GPS untuk history");
+        return;
+      }
+      if (tgl1 == '') {
+        alert("Isi waktu awal");
+        return;
+      }
+      if (tgl2 == '') {
+        alert("Isi waktu akhir");
+        return;
+      }
+      $("#historySave").prop('disabled',false);
+      
+      historyLinePos = 0;
+      var tgl1 = $("#startDate").val() + ':00';
+      var tgl2 = $("#endDate").val() + ':00';
+      tgl1 = tgl1.replace('.','-');
+      tgl1 = tgl1.replace('.','-');
+
+      tgl2 = tgl2.replace('.','-');
+      tgl2 = tgl2.replace('.','-');
+   
+      historyLineDisplay(tgl1, tgl2, devid);
+
+      return false;
+    });
+
+function historyLineDisplay(tgl1, tgl2, devid){
+    $.getJSON(document.location.origin + "/assets/API/hrpc.php", {
+        act: 'listlines',
+        tgl1: tgl1,
+        tgl2: tgl2,
+        devid: devid,
+        last: 0
+    }, function( data ) {
+        if (window.console) console.log(['listlines', data]);
+
+        if (data.root.length < 2) {
+            alert("No history record");
+            return;
+        }
+        
+        norefresh = false;
+
+        while(historyMarkers.length){
+            historyMarkers.pop().setMap(null);
+        }
+
+        for ( var i in MARKERS ) {
+            var mark = MARKERS[i];
+            
+            if ( i == devid && typeof mark.icon != 'undefined' && mark.icon ) {
+                var icons = mark.icon.split('/');
+                
+                if ( icons.length > 0 ) {
+                    cur_icon_track = icons[ icons.length - 1 ];
+                }
+            }
+            console.log(['mark', i, mark ]);
+            mark.setMap( null );
+            
+        }
+        
+        console.log(['cur_icon_track', cur_icon_track]);
+
+        for ( var i in LABELS){
+            var label = LABELS[i];
+            console.log('label', label);
+            label.setMap( null );
+        }
+                        
+        var getTitle = function(root) {
+            var engine = typeof root['tmp2'] != 'undefined' && root['tmp2'] && root['tmp2'].length > 3
+                ? ( root.tmp2.charAt(2) == '1' ? 'ON' : 'OFF' )
+                : 'N/A';
+            
+            return '<b>'+root.time_stamp+'</b><br/>'+ root.speed + 'km/h ; engine '+engine;
+        };
+
+        var awal = getTitle(data.root[0]);
+        var akhir = getTitle(data.root[data.root.length - 1]);
+        var point1 ;
+
+        if (data.start == 1) {
+            historyLine = [];
+            point1 = new google.maps.LatLng(data.root[0].lat, data.root[0].lng);
+            var startIcon = new google.maps.MarkerImage(document.location.origin + "/assets/icon/start.gif");
+            startIcon.size = new google.maps.Size(50, 50);
+            startIcon.anchor = new google.maps.Point(35, 50);
+            var marker1 = {
+                title: 'Start',
+                icon: startIcon,
+                infoWindow: {
+                    content: 'Start Position: ' + awal
+                },
+                position: point1
+            };
+        
+            var mark1 = new google.maps.Marker(marker1);
+            var iw1 = new google.maps.InfoWindow(marker1.infoWindow);
+            iw1.setPosition(point1);
+            mark1.setMap(map);
+            google.maps.event.addListener(mark1, 'click', function () {
+                iw1.open(map, mark1);
+            });
+            historyMarkers.push(mark1);
+        }
+
+        var bounds = new google.maps.LatLngBounds();
+        var path = new Array();
+        var titles = new Array();
+
+        var engine = '0', last_engine = '', total_meter = 0, last_angle = -1, angle_diff=0;
+        
+        for(var i=0,len=data.root.length; i<len; i++) {
+            var pt = new google.maps.LatLng(data.root[i].lat, data.root[i].lng);
+            historyLine.push(data.root[i]);
+        //engine = data.device_type == 'spring' && typeof data.root[i]['tmp2'] != 'undefined' && data.root[i].tmp2.length >= 3 ? data.root[i].tmp2.charAt(2) : '0';
+        //angle_diff = last_angle >= 0 ? Math.abs( parseFloat(data.root[i].angle) - last_angle ) : 0;
+        if (total_meter > 10000)  {
+          var txt = data.root[i].time_stamp;
+          if (total_meter > 10000) {
+            total_meter = 0;
+          }
+
+          var infowindow = new google.maps.InfoWindow({
+            content: 'contentString'
+          });
+
+          infoBubles[infoBubles.length] = infowindow;
+        }
+        total_meter += parseFloat(data.root[i].meter);
+        last_engine = engine;
+        last_angle = parseFloat(data.root[i].angle);        
+        bounds.extend(pt);
+        path.push(pt);
+      }
+
+      var strokeColor = map.getMapTypeId() == 'NAVIGASI' ? '#CC33FF' : "#FF0000";
+
+      var pline = new google.maps.Polyline({
+        path: path,
+        strokeColor: strokeColor,
+        strokeOpacity: 0.7,
+        strokeWeight: 2
+      });
+
+      historyMarkers.push(pline);
+
+      if (data.finish == 1) {
+        var point2 = new google.maps.LatLng(data.root[data.total - 1].lat, data.root[data.total - 1].lng);
+        var stopIcon = new google.maps.MarkerImage(document.location.origin + "/assets/icon/finish.gif");
+        stopIcon.size = new google.maps.Size(50, 50);
+        stopIcon.anchor = new google.maps.Point(35, 50);
+        var marker2 = {
+          title: 'Finish',
+          icon: stopIcon,
+          infoWindow: {
+            content: 'Finish Position: ' + akhir
+          },
+          position: point2
+        };
+        var mark2 = new google.maps.Marker(marker2);
+        var iw2 = new google.maps.InfoWindow(marker2.infoWindow);
+        iw2.setPosition(point2);
+        mark2.setMap(map);
+        google.maps.event.addListener(mark2, 'click', function () {
+          iw2.open(map, mark2);
+        });
+        historyMarkers.push(mark2);
+      }
+
+      pline.setMap(map);
+      map.fitBounds(bounds);
+      map.setCenter(point1);
+      for (var k in infoBubles)
+        infoBubles[k].open()
+
+      $("#bClear").removeAttr('disabled').removeClass('disabled');
+      $("#bSimpan").removeAttr('disabled').removeClass('disabled');
+    });
+}
+
+$('#historyPlay').click(function(e) {
+  e.preventDefault();
+  playHistory();
+});
+
+function codeLatLng(latitude, longitude) {
+var geocoder = new google.maps.Geocoder();
+var infowindow = new google.maps.InfoWindow();
+    var latlng = new google.maps.LatLng(latitude, longitude);
+    // cari lokasi dari latitude dan longitude
+    geocoder.geocode({'location': latlng}, function(results, status) {
+      if (status == google.maps.GeocoderStatus.OK) {
+        // jika berhasil, map akan secara automatis berpindah ke koordinat tersebut
+        if (results[1]) {
+
+            infowindow.setContent(results[1].formatted_address);
+          } else {
+            
+          }
+      } else {
+        
+      }
+    });
+}
+
+$("a#historyDownload").click(function(e) {
+        var devid = $("#deviceselector2").val();
+        var tgla = $("#startDate").val();
+        var tglb = $("#endDate").val();
+          e.preventDefault();
+            if (devid == 'Pilih Armada') {
+              alert("Pilih unit GPS untuk history");
+              return;
+            }
+            if (tgla == '') {
+                alert("Isi waktu awal");
+                return;
+            }
+            if (tglb == '') {
+                alert("Isi waktu akhir");
+                return;
+            }
+
+            var tgltemp = tgla.split(' ');
+            var yeartemp = tgltemp[0].split('.')
+            tgla = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+            tgltemp = tglb.split(' ');
+            yeartemp = tgltemp[0].split('.')
+            tglb = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+            var url = document.location.origin + "/assets/API/hrpc.php?act=getgpx&tgl1="+tgla +"&tgl2="+ tglb +"&devid="+devid;
+        $("#secretIFrame").attr("src", url);
+});
+
+$("a#dnlHistory").click(function(e) {
+        var devid = $("#deviceselector2mob").val();
+        var tgla = $("#start").val();
+        var tglb = $("#end").val();
+          e.preventDefault();
+            if (devid == 'Pilih Armada') {
+              alert("Pilih unit GPS untuk history");
+              return;
+            }
+            if (tgla == '') {
+                alert("Isi waktu awal");
+                return;
+            }
+            if (tglb == '') {
+                alert("Isi waktu akhir");
+                return;
+            }
+
+            var tgltemp = tgla.split(' ');
+            var yeartemp = tgltemp[0].split('.')
+            tgla = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+            tgltemp = tglb.split(' ');
+            yeartemp = tgltemp[0].split('.')
+            tglb = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+            var url = document.location.origin + "/assets/API/hrpc.php?act=getgpx&tgl1="+tgla +"&tgl2="+ tglb +"&devid="+devid;
+        $("#secretIFrame").attr("src", url);
+});
+
+$('#historySave').click(function(e) {
+    var devid = $("#deviceselector2").val();
+    var tgl1 = $("#startDate").val();
+    var tgl2 = $("#endDate").val();
+
+      if (devid == 'Pilih Armada') {
+        alert("Pilih unit GPS untuk history");
+        return;
+      }
+      if (tgl1 == '') {
+        alert("Isi waktu awal");
+        return;
+      }
+      if (tgl2 == '') {
+        alert("Isi waktu akhir");
+        return;
+      }
+
+  var name = prompt("Masukkan Nama", "rute");
+  saveHistory(name);
+  refreshSavedHistory(0);
+  location.reload();
+});
+
+
+//History Mobile
+
+  function  SavedHistorymob(page = 1){
+    var table = $('#savedHistorymob tbody');
+    table.find('tr').remove();
+    savedHistoryPage = page;
+    savedHistoryArray = [];
+
+    $.ajax({
+      type: 'GET',
+      dataType: 'json',
+      data: {act: "listroute", start: page * 20 - 19, limit: page * 20, kode: ''},
+      url: document.location.origin + "/assets/API/hrpc.php",
+      success: function(data) {
+        $.each(data['root'], function( index, value ) {
+          var markup = '<tr class="shistorymob">'+
+          '<td>'+ value.nama +'</td>'+
+          '<td><i class="fa fa-eye marright2"></i> <a href="#" class="displaySavedHistory" data-index="'+index+'">Lihat</a></td>'+
+          '<td><i class="fa fa-trash marright2"></i> <a href="" class="deleteSavedHistory" data-index="'+index+'">Hapus</a></td>'+
+          '</tr>';
+          table.append(markup);
+          savedHistoryArray.push(value);
+        });
+
+
+          pageSize = 3;
+          pagesCount = $('.shistorymob').length;
+          //pages = pagesCount / 2;
+          var currentPage = 1;
+    
+          /////////// PREPARE NAV ///////////////
+          var nav = '';
+          var totalPages = Math.ceil(pagesCount / pageSize);
+          console.log("tp :", pagesCount);
+          for (var s=0; s<totalPages; s++){
+              nav += '<li class="num2"><a href="#">'+(s+1)+'</a></li>';
+          }
+          $(".prevs").after(nav);
+          $(".num2").first().addClass("active");
+          //////////////////////////////////////
+
+          showPageMob = function() {
+            $(".shistorymob").hide().each(function(n) {
+            if (n >= pageSize * (currentPage - 1) && n < pageSize * currentPage)
+                $(this).show();
+            });
+          }
+          showPageMob();
+
+
+          $(".pagination li.num2").click(function() {
+          $(".pagination li").removeClass("active");
+          $(this).addClass("active");
+            currentPage = parseInt($(this).text());
+          showPageMob();
+          });
+
+          $(".pagination li.prevs").click(function() {
+            if($(this).next().is('.active')) return;
+          $('.num2.active').removeClass('active').prev().addClass('active');
+              currentPage = currentPage > 1 ? (currentPage-1) : 1;
+          showPageMob();
+          });
+
+          $(".pagination li.nexts").click(function() {
+              if($(this).prev().is('.active')) return;
+          $('.num2.active').removeClass('active').next().addClass('active');
+              currentPage = currentPage < totalPages ? (currentPage+1) : totalPages;
+          showPageMob();
+          });
+
+
+      }
+    })
+
+    console.log('refreshing saved history mob');
+  }
+
+function goPlaymob() {
+    if (!isplay) return;
+    if (typeof historyLine[historyLinePos] == 'undefined') {
+      playHistorymob();
+      return;
+    }
+
+    if (historyLinePos > 0) {infowindowHistory.close();}
+    console.log('memainkan');
+    console.log('line pos', historyLine[historyLinePos]);
+    var devid = $("#deviceselector2mob").val();
+    var marker = MARKERS[devid];
+    historyLinePos++;
+
+    var infowindowContent = historyLine[historyLinePos].title;
+    if (infowindowContent === null) {
+      isplay = false;
+    }
+    infowindowHistory = new google.maps.InfoWindow({
+      content: 'Posisi : ' + infowindowContent
+    });
+
+    if (window.console) console.log([ 'marker:', marker, devid  ]);
+    google.maps.event.clearListeners(marker, 'click');
+
+    var angels = historyLine[historyLinePos].angle;
+    
+    if (angels >= 0 && angels <= 14){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil1.png"); 
+
+    }else if(angels >= 15 && angels <= 75 ){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil2.png"); 
+
+    }else if(angels >= 76  &&  angels <= 104){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil3.png"); 
+
+    }else if(angels >= 105 && angels <= 165){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil4.png"); 
+
+    }else if(angels >= 166 && angels <= 194){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil5.png"); 
+
+    }else if(angels >= 195 && angels <= 255){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil6.png");
+
+    }else if(angels >= 256 && angels <= 284){
+
+       var  icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil7.png"); 
+
+    }else if(angels >= 285 && angels <= 345){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil8.png");
+
+    }else if (angels >= 346 && angels <= 360){
+
+       var icons = new google.maps.MarkerImage(document.location.origin + "/assets/icon/mobil1_off.png"); 
+
+    } 
+
+    var pointz = new google.maps.LatLng( historyLine[historyLinePos].lat, historyLine[historyLinePos].lng );
+
+    infowindowHistory.setPosition( pointz );
+    marker.setPosition( pointz );
+    marker.setMap( map );
+    marker.setIcon( icons );
+    map.panTo( new google.maps.LatLng( historyLine[historyLinePos].lat, historyLine[historyLinePos].lng  ) );
+    infowindowHistory.open(map, marker);
+}
+
+function simpanHistory(name){
+    console.log(name);
+    var devid = $("#deviceselector2mob").val();
+    var tgl1 = $("#start").val();
+    var tgl2 = $("#end").val();
+
+    var tgltemp = tgl1.split(' ');
+    var yeartemp = tgltemp[0].split('.')
+    tgl1 = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+    tgltemp = tgl2.split(' ');
+    yeartemp = tgltemp[0].split('.')
+    tgl2 = yeartemp[2] + '-' + yeartemp[1] + '-' + yeartemp[0] + ' ' + tgltemp[1];
+
+    $.ajax({
+      type: 'POST',
+      dataType: 'json',
+      data: {nama: name, deviceid: devid, starttime: tgl1 ,endtime: tgl2 ,distance: 0, duration: 0 },
+      url: document.location.origin + "/assets/API/rpc.php?act=saveroute",
+      success: function(data) {
+        console.log(data);
+      }
+    });
+}
+
+function playHistorymob() {
+    if (isplay) {
+      $('#bPlay').html('Mainkan');
+      clearTimeout(toPlay);
+      isplay = false;
+    } else {
+      $('#bPlay').html('Berhenti');
+      isplay = true;
+        // toPlay = setTimeout(goPlay(), 1000);
+      toPlay = window.setInterval(function(){
+          goPlaymob();
+        }, 1000);
+      }
+}
+
+$('#bPlay').click(function(e) {
+  e.preventDefault();
+  playHistorymob();
+});
+
+$("#bCheck").click(function(e) {
+
+      var devid = $("#deviceselector2mob").val();
+      if (devid == 'Pilih Armada') {
+        alert("Pilih unit GPS untuk history");
+        return;
+      }
+      if (tgl1 == '') {
+        alert("Isi waktu awal");
+        return;
+      }
+      if (tgl2 == '') {
+        alert("Isi waktu akhir");
+        return;
+      }
+
+      historyLinePos = 0;
+      var tgl1 = $("#start").val() + ':00';
+      var tgl2 = $("#end").val() + ':00';
+      tgl1 = tgl1.replace('.','-');
+      tgl1 = tgl1.replace('.','-');
+
+      tgl2 = tgl2.replace('.','-');
+      tgl2 = tgl2.replace('.','-');
+   
+      historyLineDisplay(tgl1, tgl2, devid);
+
+      return false;
+});
+
+$('#bSimpan').click(function(e) {
+    var devid = $("#deviceselector2mob").val();
+    var tgl1 = $("#start").val();
+    var tgl2 = $("#end").val();
+
+      if (devid == 'Pilih Armada') {
+        alert("Pilih unit GPS untuk history");
+        return;
+      }
+      if (tgl1 == '') {
+        alert("Isi waktu awal");
+        return;
+      }
+      if (tgl2 == '') {
+        alert("Isi waktu akhir");
+        return;
+      }
+
+ 
+    var name = prompt("Masukkan Nama", "rute");
+    simpanHistory(name);
+    SavedHistorymob(0);
+    location.reload();
+    $(this).attr('disabled', 'disabled').addClass('disabled');
+});
+
+$("#bClear").click(function() {
+    $(this).attr('disabled', 'disabled').addClass('disabled');
+    norefresh=true;
+    $('#deviceselector2mob').val('Pilih Armada');
+    $("#start").val('');
+    $("#end").val('');
+    clearMarks();
+    updateMarkers();
+});
+
+
+//Pagar Virtual
+
+  $('#btnAddPagar').click(function(){
+      // $("#menuTabLink").trigger('click');
+      // $('#form_geofence_container').fadeIn();
+      // $('#form_geofence').clearForm( true );
+      $('#formPagar .fs-option.g0').removeClass('selected');
+      $('#geoForm .fs-label').html('Pilih Armada');
+      $('#pagarNama').val('');
+      $('#map-container').attr('style', 'border: 1px solid #f00');
+      $('#formPagar').fadeIn();
+      clearOverlay();
+      clearMarks();
+      drawingManager.setOptions( {drawingControl:true} );
+    });
+
+function saveGeofence()
+{
+  var inout = $('input[name=inout]:checked', '#geoForm').val();
+  var nama = $('#pagarNama').val();
+
+  var deviid = $('#deviceselector3').val();
+  var geo_type = $('#geo_type_geofence').val();
+  var geo_point = $('#geo_point_geofence').val();
+  var id = $('#id_geo').val();
+  var i,
+  devidarray = [];
+
+  if ( deviid.length ) {
+      for ( i=0; i<deviid.length; i++) {
+          devidarray.push( deviid[i].inputValue );
+      }
+      $('#devid_geo').val(deviid.join(','));
+
+  } else {
+      $('#devid_geo').val(deviid);
+  }
+
+  var devid = $('#devid_geo').val();
+  console.log(devid);
+  $.ajax({
+      type: 'POST',
+      dataType: 'json',
+      data: {nama: nama, geo_type: geo_type, geo_point: geo_point, inout: inout, id:id, notifikasi:0, devid: devid},
+      url: document.location.origin + "/assets/API/rpc.php?act=savegeofence",
+      success: function(data) {
+        console.log(data);
+        //refreshAddGeofence();
+        location.reload();
+      }
+   });
+
+   console.log('refreshing saved geofecence');
+}
+
+  $(document).on("click", '#formPagar #btnPagarSimpan', function(e) {
+        e.preventDefault();
+        //initialize();
+        saveGeofence();
+  });
+
+  $('#geofenceList').on('change', function(e) {
+      e.preventDefault();
+      var o = $('#geofenceList option:selected');
+
+      //$("#menuTabLink").trigger('click');
+      if ( o.val() == 'Pilih Pagar' ) {
+          clearOverlay();
+          clearMarks();
+          $('#btnEditPagar, #btnHapusPagar').attr( 'disabled', true );
+          $("#btnPagarBatal").trigger('click');
+          $('#map-container').attr('style', 'border: 1px solid #fff');
+          drawingManager.setOptions( {drawingControl:false} );
+      } else {
+          $('#btnEditPagar, #btnHapusPagar').attr( 'disabled', false );
+          $('#map-container').attr('style', 'border: 1px solid #fff');
+          clearOverlay();
+          clearMarks();
+          drawingManager.setOptions( {drawingControl:false} );
+          showGeofence( o.data('values'), false );
+      }
+  });
+
+  $('#btnPagarBatal').on('click', function(){
+          $('#formPagar').fadeOut();
+          $('#formPagar .fs-option.g0').removeClass('selected');
+          $('#geoForm .fs-label').html('Pilih Armada');
+          $('#pagarNama').val('');
+          $('#map-container').attr('style', 'border: 1px solid #fff');
+          clearOverlay();
+          drawingManager.setOptions( {drawingControl:false} );
+  });
+
+  $(document).on("click", '#btnEditPagar', function(output) {
+        var geofenceid = $('#geofenceList').val();
+        var o = $('#geofenceList option:selected'),
+            f = $("#formPagar"),
+            v = o.data('values');
+
+                $('#geoForm [name=editPagarNama]').val(v.nama);
+
+          
+            for ( var k in v ) {
+                  if ( k == 'inout' ){
+                          $('#geoForm [name='+ k +']').filter('[value='+ v[ k ] +']').attr( 'checked', true );
+                  } else {
+                          $('#geoForm [name='+ k +']').val( v[ k ] );
+                  }
+            }
+
+            $('#id_geo').val(v.id);
+
+        var i, devidarray = [];
+        var d_dev ;
+         
+        $.ajax({
+            url: document.location.origin + "/assets/API/rpc.php?act=getgeofencedevice&geofenceid=" + v.id,
+            type: 'GET',
+            dataType: 'json',
+            success: function(data) {
+            if ( window.console ) console.log([data]);
+                if (data.ok) {
+                  $('#geoForm [name=devid]').val( data.deviceid );
+                  var devid = $('#devid_geo').val();
+
+                  var d_split = devid.split(',');
+
+                  var  dev = $('#formPagar .fs-option.g0');
+
+                  $.each( dev, function(index, value) {
+                      var devids = $(value).data('value');
+                      var d_dev = $(value).html() ;
+
+                      for(i=0; i<d_split.length; i++)
+                       { 
+                          if(devids == d_split[i])
+                          {
+                            $(value).addClass('selected');
+                            //$('#geoForm .fs-label').html(d_dev);                          
+                          }
+
+                       }
+                  });
+
+                  
+                  // var devla  = $('#geoForm .fs-option.g0.selected');  
+
+                  // $.each( devla, function(index, value) {
+                  //         var d = $(value).data('value');
+                  //      for(i=0; i<d_split.length; i++)
+                  //      { 
+                  //         if(d == d_split[i])
+                  //         {
+                  //           d_dev = $(value).html();
+
+                  //           var d_devs = d_dev.split(',');
+
+                  //           if(d_devs.length)
+                  //           {
+                  //             for(i=0; i<d_devs.length; i++)
+                  //             {
+                  //               devidarray.push( d_devs[i].inputValue );
+                  //             }
+                  //               $('#geoForm .fs-label').html(d_devs.join(',')); 
+                  //           }else{
+                  //               $('#geoForm .fs-label').html(d_devs); 
+                  //           }
+
+                  //         }
+                  //      } 
+                  // });
+                       
+                }
+                return;
+            },
+            failure: function (resp) {}
+        });
+        // $('#geoForm [name:inout]').attr('checked', false);
+        $('#formPagar .fs-option.g0').removeClass('selected');      
+        $('#formPagar').fadeIn();
+        $('#map-container').attr('style', 'border: 1px solid #f00');
+        drawingManager.setOptions( {drawingControl:true} );
+        showGeofence( v, true );
+  });
+
+  $('#btnHapusPagar').click(function(e) {
+        e.preventDefault();
+        var geofenceid = $('#geofenceList').val();
+
+        var r = confirm("Apakah yakin akan menghapus '"+geofenceid+"'");
+        if (r == true) {
+          $.ajax({
+            type: 'GET',
+            dataType: 'json',
+            data: {act: "delgeofence", id: geofenceid},
+            url: document.location.origin + "/assets/API/rpc.php",
+            success: function(data) {
+                //refreshSavedGeofence(0);
+            }
+          }).done(function() {
+                 getGeofence();
+                 location.reload();
+                 });
+
+        } else {
+            console.log('delete canceled');
+        }
+  });
+
+  // $(document).on("click", '#btnHapusPagar', function(e) {
+  //   e.preventDefault();
+  //   btnHapusPagar($(this).data('index'));
+  // });
+
+  //   function refreshAddGeofence(page = 0){
+
+  //     var select = $('#geofecenceList option');
+  //     select.find('option').remove(); 
+
+  //     savedGeoPage = page;
+  //     savedGeoArray = [];
+
+  //       $.ajax({
+  //         type: 'GET',
+  //         dataType: 'json',
+  //         data: {act: "listgeofence"},
+  //         url: document.location.origin + "/assets/API/hrpc.php",
+  //         success: function(data) {
+
+  //         $.each(data['root'], function( index, value ) {
+  //          select.append(
+  //             $('<option></option>')
+  //             .val( value.id )
+  //             .html( value.nama )
+  //           );
+  //         savedGeoArray.push(value);
+  //       });
+  //     }
+  //   });
+  //      var t = $('#geofecenceList').val();
+  //   console.log('s', t)    
+  //   console.log('refreshing saved geofecence');
+  // }
+
+  // function btnHapusPagar(index){
+  //   var geofenceid = $('#geofenceList').val();
+  //   var r = confirm("Apakah yakin akan menghapus '"+geofenceid+"'");
+  //   if (r == true) {
+  //       $.ajax({
+  //         type: 'GET',
+  //         dataType: 'json',
+  //         data: {act: "delgeofence", id: geofenceid},
+  //         url: document.location.origin + "/assets/API/rpc.php",
+  //         success: function(data) {
+  //           refreshAddGeofence(0);
+  //         }
+  //       });
+  //   } else {
+  //       console.log('delete canceled');
+  //   }
+  // }
+
+
+
+
+    //LOKASI MINAT
+
+   $('#btnAddLokasi, #btnEditLokasi').click(function(){
+      // $("#menuTabLink").trigger('click');
+      // $('#form_geofence_container').fadeIn();
+      // $('#form_geofence').clearForm( true );
+      $('#form_Lokasi').fadeIn();
+      $('#form_Lokasi').clearForm(true);
+      drawingManager.setOptions( {drawingControl:false});
+      google.maps.event.clearListeners(map, 'click');
+      $('#map-container').attr('style', 'border: 1px solid #fff');
+      clearLokasi();
+      clearMarks();
+      clearOverlay();
+   });
+
+  function saveLokasi()
+  {
+      var nama = $('#LokasiNama').val();
+      var lat = $('#LokasiLat').val();
+      var long = $('#LokasiLong').val();
+      var keterangan = $('#LokasiKeterangan').val();
+      var id = $('#id_lokasi').val();
+      var mphoto = $('#fileLokasiImg').val();
+
+      if($('input[name=micon]').val() === "")
+      {
+          micon =  $('#fileLokasiCustomIcon').val();
+      }
+        else if($('#fileLokasiCustomIcon').val() === "")
+      {
+          micon =  $('input[name=micon]').val();
+      }
+
+        $.ajax({
+          type: 'POST',
+          dataType: 'json',
+          data: {nama: nama, latitude: lat, longitude: long, micon: micon, keterangan: keterangan, mphoto: mphoto, id:id},
+          url: document.location.origin + "/assets/API/rpc.php?act=addpoi",
+          success: function(data) {
+            console.log(data);
+            location.reload();
+          }
+        });
+
+      console.log('refreshing saved location');
+  }
+
+    $(document).on("click", '#form_Lokasi #btnLokasiSimpan', function(e) {
+        e.preventDefault();
+        //initialize();
+        saveLokasi();
+    });
+
+    $('#locationList').on('change', function(e) {
+      e.preventDefault();
+      var o = $('#locationList option:selected');
+
+            //$("#menuTabLink").trigger('click');
+            if ( o.val() == 'Pilih Lokasi' ) {
+                clearLokasi();
+                clearOverlay();
+                $('#btnEditLokasi, #btnHapusLokasi').attr('disabled', true );
+                $("#btnLokasiBatal").trigger('click');
+                $('#map-container').attr('style', 'border: 1px solid #fff');
+                drawingManager.setOptions( {drawingControl:false});
+                google.maps.event.clearListeners(map, 'click');
+            } else {
+                $('#btnEditLokasi, #btnHapusLokasi').attr('disabled', false );
+                $('#map-container').attr('style', 'border: 1px solid #fff');
+                drawingManager.setOptions( {drawingControl:false});
+                clearOverlay();
+                showLokasi( o.data('values'));
+            }
+    });
+
+    $('#btnEditLokasi').click(function(){
+        var o = $('#locationList option:selected'),
+            f = $("#form_Lokasi"),
+            v = o.data('values');
+
+     
+        $('#form_Lokasi [name=editLokasiNama]').val(v.nama);  
+        $('#form_Lokasi [name=editLokasiKeterangan]').val(v.keterangan);
+
+        for ( var k in v ) {
+            $('#form_Lokasi [name='+ k +']').val( v[ k ] );
+        }
+
+        $('#form_Lokasi [name=editLokasiLat]').val( v['lat'] );
+        $('#form_Lokasi [name=editLokasiLong]').val( v['lng'] );
+
+        $('#id_lokasi').val(v.id);
+        $('#form_Lokasi [name=micon]').val(v.icon);
+        $('#form_Lokasi [name=mphoto]').val(v.photo);
+        showLokasi( v, true );
+
+    });
+
+    $('#pick_location').click(function(e){
+        e.preventDefault();
+        $('#map-container').attr('style', 'border: 1px solid #f00');
+
+        google.maps.event.addListener( map, "click", function (event) {
+            placeLokasi( map, event.latLng );
+        });
+    });
+
+    $('#pick_icon .thumbnails a').click( function(e) {
+        e.preventDefault();
+        $('#pick_icon .thumbnails a').css('border', '1px solid #fff');
+        $('#pick_icon .thumbnails a').removeClass( 'selected');
+        $(this).css('border', '1px solid #0088CC');
+        $(this).addClass( 'selected' );
+    });
+
+    $('#pick_icon #btn_submit').click( function(e) {
+        e.preventDefault();
+        $('#pick_icon .thumbnails a')
+        if ( window.console ) console.log([$('#pick_icon .thumbnails a.selected')]);
+        $('#form_Lokasi [name=micon]').val( $('#pick_icon .thumbnails a.selected').data( 'image' ) );
+        $('#pick_icon').modal('hide');
+        return false;
+    });
+
+    $('#btnLokasiBatal').on('click', function(){
+        $('#form_Lokasi').fadeOut();
+        $('#map-container').attr('style', 'border: 1px solid #fff');
+        google.maps.event.clearListeners(map, 'click');
+        clearLokasi();
+        clearMarkers();
+        clearOverlay();
+    });
+
+    $('#btnHapusLokasi').click(function(e) {
+        e.preventDefault();
+        var lokasiid = $('#locationList').val();
+        var r = confirm("Apakah yakin akan menghapus '"+lokasiid+"'");
+        if (r == true) {
+          $.ajax({
+            type: 'GET',
+            dataType: 'json',
+            data: {act: "delpoi", id: lokasiid},
+            url: document.location.origin + "/assets/API/rpc.php",
+            success: function(data) {
+                //refreshSavedGeofence(0);
+            }
+          }).done(function() {
+                location.reload();    
+                 });
+
+        } else {
+            console.log('delete canceled');
+        }
+    });
+    
+    function NewMarkerClass() {
+        function NewMarker(position, icon = 'icon.png', onoff = 0) {
+            var frame = document.location.origin+"/assets/icon/"+ (parseInt( onoff ) === 1 ? 'background-green.png' : 'background-red.png');
+            
+            this.position = position;
+            this.icon = icon;
+            this.frame = frame;
+
+            this.containerDiv = document.createElement('div');
+            this.containerDiv.classList.add('new-marker-container');
+            this.containerDiv.innerHTML =
+                '<div class="new-marker-bubble-anchor">'+
+                    '<div class="new-marker-bubble-icon">'+
+                        '<img src="'+ this.icon +'">'+
+                    '</div>'+
+                    '<div class="new-marker-bubble">'+
+                        '<img src="'+ this.frame +'">'+
+                    '</div>'+
+                '</div>';
+
+            google.maps.OverlayView.preventMapHitsAndGesturesFrom(this.containerDiv);
+        }
+
+        NewMarker.prototype = Object.create(google.maps.OverlayView.prototype);
+        NewMarker.prototype.onAdd = function() {
+            this.getPanes().floatPane.appendChild(this.containerDiv);
+
+            var me = this;
+
+            google.maps.event.addDomListener(this.containerDiv, 'click', function(e) {
+                google.maps.event.trigger(me, 'click', me, e);
+            });
+        };
+
+        NewMarker.prototype.onRemove = function() {
+            if (this.containerDiv.parentElement) {
+                this.containerDiv.parentElement.removeChild(this.containerDiv);
+            }
+        };
+
+        NewMarker.prototype.draw = function() {
+            var divPosition = this.getProjection().fromLatLngToDivPixel(this.position);
+            var display = Math.abs(divPosition.x) < 4000 && Math.abs(divPosition.y) < 4000
+                ? 'block'
+                : 'none';
+
+            if (display === 'block') {
+                this.containerDiv.style.left = divPosition.x + 'px';
+                this.containerDiv.style.top = divPosition.y + 'px';
+            }
+            if (this.containerDiv.style.display !== display) {
+                this.containerDiv.style.display = display;
+            }
+        };
+        
+        NewMarker.prototype.setPosition = function(position) {
+            this.position = position;
+        };
+        
+        NewMarker.prototype.setIcon = function(icon) {
+            this.icon = icon;
+        };
+        
+        NewMarker.prototype.setTitle = function(title) {
+            this.title = title;
+        };
+        
+        NewMarker.prototype.setEngine = function(engine) {
+            var frame = document.location.origin+"/assets/icon/"+ (parseInt( engine ) === 1 ? 'background-green.png' : 'background-red.png');
+            this.frame = frame;
+        };
+
+        return NewMarker;
+    }
+
+});
+
+
